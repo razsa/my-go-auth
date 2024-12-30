@@ -1,16 +1,28 @@
 package controllers
 
 import (
-	"../database"
-	"../models"
+	"database/sql"
 	"github.com/dgrijalva/jwt-go"
-	"github.com/gofiber/fiber"
+	"github.com/gofiber/fiber/v2"
 	"golang.org/x/crypto/bcrypt"
 	"strconv"
 	"time"
+	
+	"github.com/razsa/go-auth/internal/database"
+	_ "github.com/mattn/go-sqlite3"
 )
 
 const SecretKey = "secret"
+
+var queries *database.Queries
+
+func init() {
+	db, err := sql.Open("sqlite3", "auth.db")
+	if err != nil {
+		panic("could not connect to the database: " + err.Error())
+	}
+	queries = database.New(db)
+}
 
 func Register(c *fiber.Ctx) error {
 	var data map[string]string
@@ -21,13 +33,14 @@ func Register(c *fiber.Ctx) error {
 
 	password, _ := bcrypt.GenerateFromPassword([]byte(data["password"]), 14)
 
-	user := models.User{
+	user, err := queries.CreateUser(c.Context(), database.CreateUserParams{
 		Name:     data["name"],
 		Email:    data["email"],
 		Password: password,
+	})
+	if err != nil {
+		return err
 	}
-
-	database.DB.Create(&user)
 
 	return c.JSON(user)
 }
@@ -39,15 +52,15 @@ func Login(c *fiber.Ctx) error {
 		return err
 	}
 
-	var user models.User
-
-	database.DB.Where("email = ?", data["email"]).First(&user)
-
-	if user.Id == 0 {
-		c.Status(fiber.StatusNotFound)
-		return c.JSON(fiber.Map{
-			"message": "user not found",
-		})
+	user, err := queries.GetUserByEmail(c.Context(), data["email"])
+	if err != nil {
+		if err == sql.ErrNoRows {
+			c.Status(fiber.StatusNotFound)
+			return c.JSON(fiber.Map{
+				"message": "user not found",
+			})
+		}
+		return err
 	}
 
 	if err := bcrypt.CompareHashAndPassword(user.Password, []byte(data["password"])); err != nil {
@@ -58,7 +71,7 @@ func Login(c *fiber.Ctx) error {
 	}
 
 	claims := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.StandardClaims{
-		Issuer:    strconv.Itoa(int(user.Id)),
+		Issuer:    strconv.Itoa(int(user.ID)),
 		ExpiresAt: time.Now().Add(time.Hour * 24).Unix(), //1 day
 	})
 
@@ -80,8 +93,10 @@ func Login(c *fiber.Ctx) error {
 
 	c.Cookie(&cookie)
 
+    // Redirect to the map view after successful login
 	return c.JSON(fiber.Map{
 		"message": "success",
+		"redirect": "/map", // Tell the frontend where to redirect
 	})
 }
 
@@ -101,9 +116,17 @@ func User(c *fiber.Ctx) error {
 
 	claims := token.Claims.(*jwt.StandardClaims)
 
-	var user models.User
+	userID, err := strconv.Atoi(claims.Issuer)
+    if err != nil {
+    return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+        "message": "invalid user ID",
+    })
+}
 
-	database.DB.Where("id = ?", claims.Issuer).First(&user)
+    user, err := queries.GetUserByID(c.Context(), int64(userID))
+    if err != nil {
+			return err
+}
 
 	return c.JSON(user)
 }

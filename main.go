@@ -1,22 +1,29 @@
 package main
 
 import (
-	"./database"
-	"./routes"
-	"github.com/gofiber/fiber"
-	"github.com/gofiber/fiber/middleware/cors"
+    "embed"
+	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v2/middleware/filesystem"
+	"github.com/razsa/go-auth/routes"
+	"net/http"
 )
 
+//go:embed fe/*
+var fe embed.FS
+
 func main() {
-	database.Connect()
 
 	app := fiber.New()
-
-	app.Use(cors.New(cors.Config{
-		AllowCredentials: true,
-	}))
-
+	
+    // Setup routes
 	routes.Setup(app)
+	
+	// Serve embedded frontend files
+	app.Use("/", filesystem.New(filesystem.Config{
+			Root: http.FS(fe),
+			PathPrefix: "fe",
+			Browse: true,
+	}))
 
 	app.Listen(":8000")
 }

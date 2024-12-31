@@ -2,14 +2,17 @@ package controllers
 
 import (
 	"database/sql"
+	"fmt"
+	"os"
+	"strconv"
+	"time"
+
 	"github.com/dgrijalva/jwt-go"
 	"github.com/gofiber/fiber/v2"
 	"golang.org/x/crypto/bcrypt"
-	"strconv"
-	"time"
-	
+
+	_ "github.com/go-sql-driver/mysql"
 	"github.com/razsa/go-auth/internal/database"
-	_ "github.com/mattn/go-sqlite3"
 )
 
 const SecretKey = "secret"
@@ -17,7 +20,7 @@ const SecretKey = "secret"
 var queries *database.Queries
 
 func init() {
-	db, err := sql.Open("sqlite3", "auth.db")
+	db, err := sql.Open("mysql", fmt.Sprintf("%s:%s@tcp(localhost:3306)/%s", os.Getenv("USER"), os.Getenv("PASSWORD"), os.Getenv("DB_NAME")))
 	if err != nil {
 		panic("could not connect to the database: " + err.Error())
 	}
@@ -33,14 +36,11 @@ func Register(c *fiber.Ctx) error {
 
 	password, _ := bcrypt.GenerateFromPassword([]byte(data["password"]), 14)
 
-	user, err := queries.CreateUser(c.Context(), database.CreateUserParams{
+	user := queries.CreateUser(c.Context(), database.CreateUserParams{
 		Name:     data["name"],
 		Email:    data["email"],
 		Password: password,
 	})
-	if err != nil {
-		return err
-	}
 
 	return c.JSON(user)
 }
@@ -93,9 +93,9 @@ func Login(c *fiber.Ctx) error {
 
 	c.Cookie(&cookie)
 
-    // Redirect to the map view after successful login
+	// Redirect to the map view after successful login
 	return c.JSON(fiber.Map{
-		"message": "success",
+		"message":  "success",
 		"redirect": "/map", // Tell the frontend where to redirect
 	})
 }
@@ -117,16 +117,16 @@ func User(c *fiber.Ctx) error {
 	claims := token.Claims.(*jwt.StandardClaims)
 
 	userID, err := strconv.Atoi(claims.Issuer)
-    if err != nil {
-    return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-        "message": "invalid user ID",
-    })
-}
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"message": "invalid user ID",
+		})
+	}
 
-    user, err := queries.GetUserByID(c.Context(), int64(userID))
-    if err != nil {
-			return err
-}
+	user, err := queries.GetUserByID(c.Context(), int32(userID))
+	if err != nil {
+		return err
+	}
 
 	return c.JSON(user)
 }
